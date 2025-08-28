@@ -1,0 +1,224 @@
+service: appointment-service
+
+frameworkVersion: '3'
+
+plugins:
+  - serverless-esbuild
+  - serverless-offline
+  - serverless-dynamodb-local
+  - serverless-offline-sns
+
+custom:
+
+  serverless-offline-sns:
+    port: 4002
+    debug: false
+
+  dynamodb:
+    stages:
+      - offline
+    start:
+      jarPath: ./dynamodb_local/DynamoDBLocal.jar
+      port: 8000
+      inMemory: true
+      migrate: true
+
+  esbuild:
+    bundle: true
+    minify: false
+    sourcemap: true
+    target: node22
+    platform: node
+    concurrency: 10
+    external: []
+
+provider:
+  name: aws
+  runtime: nodejs18.x
+  region: us-east-1
+  architecture: arm64
+  environment:
+    DYNAMODB_TABLE: Appointments
+    SNS_TOPIC_NAME: appointmentTopic
+    SQS_PE_NAME: appointmentQueuePE
+    SQS_CL_NAME: appointmentQueueCL
+    SNS_TOPIC_ARN: 
+      Ref: AppointmentTopic
+    CONFIRMATION_SQS_NAME: appointmentConfirmationQueue
+    DB_PE_HOST: ${env:DB_PE_HOST, 'localhost'}
+    DB_PE_USER: ${env:DB_PE_USER, 'user'}
+    DB_PE_PASSWORD: ${env:DB_PE_PASSWORD, 'password'}
+    DB_PE_DATABASE: ${env:DB_PE_DATABASE, 'appointments_pe'}
+    DB_CL_HOST: ${env:DB_CL_HOST, 'localhost'}
+    DB_CL_USER: ${env:DB_CL_USER, 'user'}
+    DB_CL_PASSWORD: ${env:DB_CL_PASSWORD, 'password'}
+    DB_CL_DATABASE: ${env:DB_CL_DATABASE, 'appointments_cl'}
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            - dynamodb:PutItem
+            - dynamodb:Query
+            - dynamodb:UpdateItem
+          Resource:
+            - { "Fn::GetAtt": ["AppointmentTable", "Arn"] }
+            - { "Fn::Join": ["", [{"Fn::GetAtt": ["AppointmentTable", "Arn"]}, "/index/*"]] }
+        - Effect: Allow
+          Action: sns:Publish
+          Resource: "*"
+        - Effect: Allow
+          Action:
+            - sqs:SendMessage
+            - sqs:ReceiveMessage
+            - sqs:DeleteMessage
+            - sqs:GetQueueAttributes
+          Resource:
+            - { "Fn::GetAtt": ["SQSPE", "Arn"] }
+            - { "Fn::GetAtt": ["SQSCL", "Arn"] }
+            - { "Fn::GetAtt": ["ConfirmationSQS", "Arn"] }
+        - Effect: Allow
+          Action:
+            - events:PutEvents
+          Resource: "*"
+
+functions:
+  appointmentApi:
+    handler: src/lambdas/appointment.httpHandler
+    events:
+      - httpApi:
+          path: /appointment
+          method: post
+      - httpApi:
+          path: /appointment/{insuredId}
+          method: get
+
+  appointmentConfirmer:
+    handler: src/lambdas/appointment.confirmHandler
+    events:
+      - sqs:
+          arn: { "Fn::GetAtt": ["ConfirmationSQS", "Arn"] }
+
+  appointmentPE:
+    handler: src/lambdas/appointment_pe.main
+    events:
+      - sqs:
+          arn: { "Fn::GetAtt": ["SQSPE", "Arn"] }
+
+  appointmentCL:
+    handler: src/lambdas/appointment_cl.main
+    events:
+      - sqs:
+          arn: { "Fn::GetAtt": ["SQSCL", "Arn"] }
+
+resources:
+  Resources:
+    AppointmentTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:provider.environment.DYNAMODB_TABLE}
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: insuredId
+            AttributeType: S
+          - AttributeName: scheduleId
+            AttributeType: N
+        KeySchema:
+          - AttributeName: insuredId
+            KeyType: HASH
+          - AttributeName: scheduleId
+            KeyType: RANGE
+
+    SQSPE:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: ${self:provider.environment.SQS_PE_NAME}
+
+    SQSCL:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: ${self:provider.environment.SQS_CL_NAME}
+
+    ConfirmationSQS:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: ${self:provider.environment.CONFIRMATION_SQS_NAME}
+
+    AppointmentTopic:
+      Type: AWS::SNS::Topic
+      Properties:
+        TopicName: ${self:provider.environment.SNS_TOPIC_NAME}
+
+    SnsSubscriptionPE:
+      Type: AWS::SNS::Subscription
+      Properties:
+        TopicArn: { "Ref": "AppointmentTopic" }
+        Protocol: sqs
+        Endpoint: { "Fn::GetAtt": ["SQSPE", "Arn"] }
+        RawMessageDelivery: true
+        FilterPolicy:
+          countryISO: ["PE"]
+
+    SnsSubscriptionCL:
+      Type: AWS::SNS::Subscription
+      Properties:
+        TopicArn: { "Ref": "AppointmentTopic" }
+        Protocol: sqs
+        Endpoint: { "Fn::GetAtt": ["SQSCL", "Arn"] }
+        RawMessageDelivery: true
+        FilterPolicy:
+          countryISO: ["CL"]
+
+    SqsPolicyPE:
+      Type: AWS::SQS::QueuePolicy
+      Properties:
+        Queues:
+          - { "Ref": "SQSPE" }
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Principal: {"Service": "sns.amazonaws.com"}
+              Action: "sqs:SendMessage"
+              Resource: { "Fn::GetAtt": ["SQSPE", "Arn"] }
+              Condition:
+                ArnEquals:
+                  aws:SourceArn: { "Ref": "AppointmentTopic" }
+
+    SqsPolicyCL:
+      Type: AWS::SQS::QueuePolicy
+      Properties:
+        Queues:
+          - { "Ref": "SQSCL" }
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Principal: {"Service": "sns.amazonaws.com"}
+              Action: "sqs:SendMessage"
+              Resource: { "Fn::GetAtt": ["SQSCL", "Arn"] }
+              Condition:
+                ArnEquals:
+                  aws:SourceArn: { "Ref": "AppointmentTopic" }
+
+    AppointmentBus:
+      Type: AWS::Events::EventBus
+      Properties:
+        Name: appointment-bus
+
+    AppointmentConfirmedRule:
+      Type: AWS::Events::Rule
+      Properties:
+        EventBusName: { "Ref": "AppointmentBus" }
+        EventPattern:
+          source: ["appointment.workers"]
+          detail-type: ["AppointmentConfirmed"]
+        Targets:
+          - Arn: { "Fn::GetAtt": ["ConfirmationSQS", "Arn"] }
+            Id: "ConfirmationSQSTarget"
+
+  Outputs:
+    SnsTopicArn:
+      Value: { "Ref": "AppointmentTopic" }
+      Export:
+        Name: "${self:service}-sns-topic-arn"

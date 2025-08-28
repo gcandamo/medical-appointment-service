@@ -1,0 +1,40 @@
+{
+  "name": "appointment-service",
+  "version": "1.0.0",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "deploy": "serverless deploy",
+    "remove": "serverless remove",
+    "test": "jest",
+    "offline": "cross-env IS_OFFLINE=true serverless offline --stage offline",
+    "dynamodb:start": "cross-env IS_OFFLINE=true serverless dynamodb start --stage offline",
+    "create:table": "node scripts/createTable.js"
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "^8.10.137",
+    "@types/jest": "^29.5.12",
+    "@types/node": "^20.14.10",
+    "cross-env": "^10.0.0",
+    "esbuild": "^0.23.1",
+    "jest": "^29.7.0",
+    "serverless": "^3.39.0",
+    "serverless-dynamodb-local": "^0.2.40",
+    "serverless-esbuild": "^1.55.1",
+    "serverless-offline": "^13.9.0",
+    "serverless-offline-sns": "^0.78.1",
+    "ts-jest": "^29.2.5",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.5.4"
+  },
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.876.0",
+    "@aws-sdk/client-sns": "^3.876.0",
+    "@aws-sdk/client-sqs": "^3.876.0",
+    "@aws-sdk/lib-dynamodb": "^3.876.0",
+    "mysql2": "^3.11.3",
+    "uuid": "^9.0.1",
+    "zod": "^3.23.8"
+  }
+}

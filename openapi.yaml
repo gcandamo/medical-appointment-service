@@ -1,0 +1,66 @@
+openapi: 3.0.3
+info:
+  title: Appointment Service API
+  version: 1.0.0
+  description: API para registrar y listar citas medicas
+servers:
+  - url: https://{apiId}.execute-api.{region}.amazonaws.com
+    variables:
+      apiId:
+        default: 6vpy1i5625
+      region:
+        default: us-east-1
+paths:
+  /appointment:
+    post:
+      summary: Crear una cita
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [insuredId, scheduleId, countryISO]
+              properties:
+                insuredId:
+                  type: string
+                  example: "01234"
+                scheduleId:
+                  type: integer
+                  example: 100
+                countryISO:
+                  type: string
+                  enum: [PE, CL]
+                  example: PE
+      responses:
+        "200":
+          description: Registro de cita en proceso
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+  /appointment/{insuredId}:
+    get:
+      summary: Listar cita por insuredId
+      parameters:
+        - in: path
+          name: insuredId
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Lista de citas
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    insuredId: { type: string }
+                    scheduleId: { type: integer }
+                    status: { type: string }
